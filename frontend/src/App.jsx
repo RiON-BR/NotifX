@@ -1,34 +1,24 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { db, messaging, VAPID_KEY } from './firebase';
 import { collection, doc, setDoc, addDoc, onSnapshot, query, orderBy, updateDoc, deleteDoc } from 'firebase/firestore';
 import { getToken, onMessage } from 'firebase/messaging';
 
 export default function App() {
-  // Core input states
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [fcmToken, setFcmToken] = useState('');
   const [notificationsList, setNotificationsList] = useState([]);
   
-  // Custom theme and profile analytics counters
   const [darkMode, setDarkMode] = useState(false);
   const [totalSentCount, setTotalSentCount] = useState(0);
   const [userName, setUserName] = useState('');
   const [isNameSet, setIsNameSet] = useState(false);
   const [tempName, setTempName] = useState('');
-
-  // Scheduler queues and interaction states
-  const [delaySettings, setDelaySettings] = useState({});
-  const [intervalSettings, setIntervalSettings] = useState({});
-  const [activeTimers, setActiveTimers] = useState({});
-  const [activeIntervals, setActiveIntervals] = useState({});
   const [actionFeedback, setActionFeedback] = useState({}); 
   const [isSubmitting, setIsSubmitting] = useState(false);
   
-  // LIVE PIPELINE STATUS
   const [connectionStatus, setConnectionStatus] = useState("Connecting...");
 
-  // Load configuration tokens from localStorage on mount
   useEffect(() => {
     const savedName = localStorage.getItem('studio_username');
     if (savedName) {
@@ -42,24 +32,19 @@ export default function App() {
     async function initializeNotificationPipeline() {
       try {
         if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-          console.warn("This browser context doesn't support background system notifications.");
           setConnectionStatus("Unsupported");
           return;
         }
 
-        // Register the background worker file explicitly
         const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
         await navigator.serviceWorker.ready;
-        console.log("Service Worker Active Scope:", registration.scope);
 
-        // Request desktop banners authority
         const permission = await Notification.requestPermission();
         if (permission !== 'granted') {
           setConnectionStatus("Permission Denied");
           return;
         }
 
-        // Fetch secure token passing registration parameters
         const targetDeviceToken = await getToken(messaging, {
           vapidKey: VAPID_KEY,
           serviceWorkerRegistration: registration
@@ -68,9 +53,10 @@ export default function App() {
         if (targetDeviceToken) {
           setFcmToken(targetDeviceToken);
           
-          // Mirror tracking credentials directly up to your Firestore database backend
+          // 🔥 BUG FIX 2 RESOLVED: Field key altered from 'fcmToken' to 'token' 
+          // to prevent backend read extraction queries from pulling an undefined value.
           await setDoc(doc(db, "config", "targetDevice"), {
-            fcmToken: targetDeviceToken,
+            token: targetDeviceToken, 
             heartbeat: new Date().toISOString(),
             lastSeen: Date.now()
           }, { merge: true });
@@ -88,24 +74,19 @@ export default function App() {
     initializeNotificationPipeline();
   }, []);
 
-  // Sync saved reminder collections from Firestore database ledger
   useEffect(() => {
     const q = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       setNotificationsList(list);
-      
-      // Calculate continuous dispatch scores natively
       const count = list.reduce((acc, curr) => acc + (curr.sentCount || 0), 0);
       setTotalSentCount(count);
     });
     return () => unsubscribe();
   }, []);
 
-  // Foreground message catcher hook loop
   useEffect(() => {
     const unsubscribe = onMessage(messaging, (payload) => {
-      console.log('Foreground notification caught: ', payload);
       new Notification(payload.notification.title, {
         body: payload.notification.body,
         icon: '/icons.svg'
@@ -114,7 +95,6 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Core Template Engine Dispatch Handlers
   const handleSaveTemplate = async (e) => {
     e.preventDefault();
     if (!title.trim() || !body.trim()) return;
@@ -138,13 +118,13 @@ export default function App() {
   const handleSendNotification = async (id, notificationTitle, notificationBody) => {
     setActionFeedback(prev => ({ ...prev, [id]: 'Sending...' }));
     try {
-      // Increments transaction tracker on MongoDB pipeline layer
       const docRef = doc(db, 'notifications', id);
       const target = notificationsList.find(n => n.id === id);
       await updateDoc(docRef, { sentCount: (target.sentCount || 0) + 1 });
       
-      // Post atomic event trigger up to Firestore trigger node collection channels
-      await addDoc(collection(db, 'triggerQueue'), {
+      // 🔥 BUG FIX 1 RESOLVED: Destination route redirected 
+      // from 'triggerQueue' directly into 'notification_triggers'
+      await addDoc(collection(db, 'notification_triggers'), {
         title: notificationTitle,
         body: notificationBody,
         token: fcmToken,
@@ -173,7 +153,6 @@ export default function App() {
     setIsNameSet(true);
   };
 
-  // Preset quick fillers macro buttons
   const applyPreset = (presetType) => {
     if (presetType === 'water') {
       setTitle('💧 Hydration Check!');
@@ -201,7 +180,6 @@ export default function App() {
   return (
     <div style={{ backgroundColor: darkMode ? '#0f111a' : '#f8fafc', minHeight: '100vh', color: darkMode ? '#f8fafc' : '#0f111a', fontFamily: 'sans-serif', transition: 'all 0.3s ease' }}>
       
-      {/* HEADER HERO STRIP PANEL */}
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 40px', borderBottom: `1px solid ${darkMode ? '#1e2230' : '#e2e8f0'}`, background: darkMode ? '#161925' : '#fff' }}>
         <div>
           <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 800 }}>NJ's Workspace <span style={{ fontSize: '14px', fontWeight: 400, opacity: 0.6 }}>({userName})</span></h1>
@@ -209,21 +187,17 @@ export default function App() {
         </div>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-          {/* LIVE NETWORK PIPELINE STATUS CARD */}
           <div style={{ background: darkMode ? '#1e2230' : '#f1f5f9', padding: '8px 16px', borderRadius: '20px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold' }}>
             <span style={{ color: connectionStatus === "Connected" ? "#10b981" : "#f59e0b" }}>●</span> 
             <span style={{ opacity: 0.9 }}>{connectionStatus}</span>
           </div>
-
           <button onClick={() => setDarkMode(!darkMode)} style={{ background: darkMode ? '#1e2230' : '#e2e8f0', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: 'inherit' }}>
             {darkMode ? '☀️ Light' : '🌙 Dark'}
           </button>
-          
           <button onClick={() => { localStorage.clear(); setIsNameSet(false); }} style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '13px' }}>Switch User</button>
         </div>
       </header>
 
-      {/* DASHBOARD SCORE SUMMARY COMPONENT */}
       <div style={{ padding: '20px 40px 0 40px' }}>
         <div style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)', color: '#fff', padding: '20px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 4px 15px rgba(29, 78, 216, 0.2)' }}>
           <div>
@@ -234,10 +208,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* DOUBLE PANEL DATA DESK GRID LAYOUT */}
       <main style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '40px', padding: '30px 40px' }}>
-        
-        {/* PANEL LEFT: MANIFEST GENERATION DESK */}
         <section style={{ background: darkMode ? '#161925' : '#fff', padding: '30px', borderRadius: '12px', border: `1px solid ${darkMode ? '#1e2230' : '#e2e8f0'}` }}>
           <h2 style={{ marginTop: 0, marginBottom: '20px', fontSize: '20px', borderBottom: '2px solid #3b82f6', paddingBottom: '10px' }}>Create New Reminder</h2>
           
@@ -266,11 +237,10 @@ export default function App() {
           </form>
         </section>
 
-        {/* PANEL RIGHT: COLLECTION TEMPLATE LEDGER */}
         <section style={{ background: darkMode ? '#161925' : '#fff', padding: '30px', borderRadius: '12px', border: `1px solid ${darkMode ? '#1e2230' : '#e2e8f0'}`, display: 'flex', flexDirection: 'column' }}>
           <h2 style={{ marginTop: 0, marginBottom: '20px', fontSize: '20px', borderBottom: '2px solid #10b981', paddingBottom: '10px' }}>Saved Reminders Collection ({notificationsList.length})</h2>
           
-          <div style={{ flex: 1, overflowY: 'auto', maxHieght: '500px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+          <div style={{ flex: 1, overflowY: 'auto', maxHeight: '500px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
             {notificationsList.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '40px', opacity: 0.5 }}>No templates saved. Build your first tracking rule in the generator deck panel left.</div>
             ) : (
