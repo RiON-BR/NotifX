@@ -1,3 +1,4 @@
+// frontend/src/App.jsx
 import React, { useState, useEffect } from 'react';
 import { db, messaging, VAPID_KEY } from './firebase';
 import { collection, doc, setDoc, addDoc, onSnapshot, query, orderBy, updateDoc, deleteDoc } from 'firebase/firestore';
@@ -165,13 +166,12 @@ export default function App() {
 
   if (!isNameSet) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', backgroundColor: darkMode ? '#0f111a' : '#f3f4f6', color: darkMode ? '#fff' : '#000', fontFamily: 'sans-serif' }}>
-        <form onSubmit={handleUsernameSubmit} style={{ background: darkMode ? '#1e2230' : '#fff', padding: '40px', borderRadius: '12px', boxShadow: '0 4px 20px rgba(0,0,0,0.1)', textAlign: 'center' }}>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', backgroundColor: darkMode ? '#0f111a' : '#f3f4f6', color: darkMode ? '#fff' : '#000', fontFamily: 'sans-serif', padding: '20px', boxSizing: 'border-box' }}>
+        <form onSubmit={handleUsernameSubmit} style={{ background: darkMode ? '#1e2230' : '#fff', padding: 'clamp(20px, 5vw, 40px)', borderRadius: '12px', boxShadow: '0 4px 20px rgba(0,0,0,0.1)', textAlign: 'center', width: '100%', maxWidth: '400px', boxSizing: 'border-box' }}>
           <h2>Welcome to NotifX</h2>
-          <p style={{ opacity: 0.7, marginBottom: '20px' }}>Enter your name to unlock your notification studio workspace</p>
-          <input type="text" value={tempName} onChange={(e) => setTempName(e.target.value)} placeholder="e.g., Niyati Joshi" required style={{ width: '80%', padding: '12px', borderRadius: '6px', border: '1px solid #ccc', marginBottom: '20px', fontSize: '16px' }} />
-          <br />
-          <button type="submit" style={{ padding: '12px 30px', border: 'none', borderRadius: '6px', backgroundColor: '#3b82f6', color: '#fff', fontSize: '16px', cursor: 'pointer', fontWeight: 'bold' }}>Enter Studio Workspace</button>
+          <p style={{ opacity: 0.7, marginBottom: '20px', fontSize: '14px', lineHeight: '1.4' }}>Enter your name to unlock your notification studio workspace</p>
+          <input type="text" value={tempName} onChange={(e) => setTempName(e.target.value)} placeholder="e.g., Niyati Joshi" required style={{ width: '100%', padding: '12px', boxSizing: 'border-box', borderRadius: '6px', border: '1px solid #ccc', marginBottom: '20px', fontSize: '16px' }} />
+          <button type="submit" style={{ width: '100%', padding: '12px', border: 'none', borderRadius: '6px', backgroundColor: '#3b82f6', color: '#fff', fontSize: '16px', cursor: 'pointer', fontWeight: 'bold' }}>Enter Studio Workspace</button>
         </form>
       </div>
     );
@@ -180,43 +180,50 @@ export default function App() {
   return (
     <div style={{ backgroundColor: darkMode ? '#0f111a' : '#f8fafc', minHeight: '100vh', color: darkMode ? '#f8fafc' : '#0f111a', fontFamily: 'sans-serif', transition: 'all 0.3s ease' }}>
       
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 40px', borderBottom: `1px solid ${darkMode ? '#1e2230' : '#e2e8f0'}`, background: darkMode ? '#161925' : '#fff' }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 800 }}>NJ's Workspace <span style={{ fontSize: '14px', fontWeight: 400, opacity: 0.6 }}>({userName})</span></h1>
+      {/* HEADER ROW WITH RESPONSIVE WRAP & COMFORTABLE GAP */}
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '20px', padding: '20px clamp(15px, 4vw, 40px)', borderBottom: `1px solid ${darkMode ? '#1e2230' : '#e2e8f0'}`, background: darkMode ? '#161925' : '#fff' }}>
+        <div style={{ minWidth: '250px', flex: '1' }}>
+          <h1 style={{ margin: 0, fontSize: 'clamp(20px, 4vw, 24px)', fontWeight: 800 }}>
+            {userName ? `${userName}'s Workspace` : "My Workspace"}
+          </h1>
           <p style={{ margin: '5px 0 0 0', fontSize: '13px', opacity: 0.7 }}>Create, organize, and automate systemic desktop intervals</p>
         </div>
         
-        <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
           <div style={{ background: darkMode ? '#1e2230' : '#f1f5f9', padding: '8px 16px', borderRadius: '20px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold' }}>
             <span style={{ color: connectionStatus === "Connected" ? "#10b981" : "#f59e0b" }}>●</span> 
             <span style={{ opacity: 0.9 }}>{connectionStatus}</span>
           </div>
-          <button onClick={() => setDarkMode(!darkMode)} style={{ background: darkMode ? '#1e2230' : '#e2e8f0', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: 'inherit' }}>
+          <button onClick={() => setDarkMode(!darkMode)} style={{ background: darkMode ? '#1e2230' : '#e2e8f0', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: 'inherit', fontSize: '13px' }}>
             {darkMode ? '☀️ Light' : '🌙 Dark'}
           </button>
-          <button onClick={() => { localStorage.clear(); setIsNameSet(false); }} style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '13px' }}>Switch User</button>
+          <button onClick={() => { localStorage.clear(); setIsNameSet(false); }} style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>Switch User</button>
         </div>
       </header>
 
-      <div style={{ padding: '20px 40px 0 40px' }}>
-        <div style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)', color: '#fff', padding: '20px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 4px 15px rgba(29, 78, 216, 0.2)' }}>
-          <div>
+      {/* ANALYTICS BANNER STRIP */}
+      <div style={{ padding: '20px clamp(15px, 4vw, 40px) 0 clamp(15px, 4vw, 40px)' }}>
+        <div style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)', color: '#fff', padding: '20px', borderRadius: '12px', display: 'flex', flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '16px', boxShadow: '0 4px 15px rgba(29, 78, 216, 0.2)' }}>
+          <div style={{ flex: '1', minWidth: '260px' }}>
             <h3 style={{ margin: 0, fontSize: '18px' }}>🚀 Productivity Analytics Hub</h3>
-            <p style={{ margin: '5px 0 0 0', opacity: 0.9, fontSize: '14px' }}>You have successfully dispatched <strong style={{ fontSize: '18px' }}>{totalSentCount}</strong> secure system alerts this active session context loops!</p>
+            <p style={{ margin: '5px 0 0 0', opacity: 0.9, fontSize: '14px', lineHeight: '1.4' }}>You have successfully dispatched <strong style={{ fontSize: '18px' }}>{totalSentCount}</strong> secure system alerts this active session context loops!</p>
           </div>
-          <button onClick={() => setTotalSentCount(0)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', padding: '8px 16px', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontWeight: 'bold' }}>Reset Count</button>
+          <button onClick={() => setTotalSentCount(0)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', padding: '8px 16px', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' }}>Reset Count</button>
         </div>
       </div>
 
-      <main style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '40px', padding: '30px 40px' }}>
-        <section style={{ background: darkMode ? '#161925' : '#fff', padding: '30px', borderRadius: '12px', border: `1px solid ${darkMode ? '#1e2230' : '#e2e8f0'}` }}>
+      {/* MAIN TWO-PANEL INTERFACE WITH FLEXIBLE BREAKPOINTS */}
+      <main style={{ display: 'flex', flexDirection: 'row', flexWrap: 'wrap', gap: '30px', padding: '30px clamp(15px, 4vw, 40px)' }}>
+        
+        {/* LEFT COLUMN: CREATOR PANEL */}
+        <section style={{ flex: '1 1 400px', background: darkMode ? '#161925' : '#fff', padding: 'clamp(15px, 3vw, 30px)', borderRadius: '12px', border: `1px solid ${darkMode ? '#1e2230' : '#e2e8f0'}`, boxSizing: 'border-box' }}>
           <h2 style={{ marginTop: 0, marginBottom: '20px', fontSize: '20px', borderBottom: '2px solid #3b82f6', paddingBottom: '10px' }}>Create New Reminder</h2>
           
           <div style={{ marginBottom: '25px' }}>
             <label style={{ display: 'block', fontSize: '14px', fontWeight: 'bold', marginBottom: '8px', opacity: 0.8 }}>Quick Presets Macros:</label>
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <button onClick={() => applyPreset('water')} style={{ flex: 1, padding: '10px', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid #3b82f6', borderRadius: '6px', color: '#3b82f6', cursor: 'pointer', fontWeight: 'bold' }}>💧 Water Check</button>
-              <button onClick={() => applyPreset('break')} style={{ flex: 1, padding: '10px', background: 'rgba(168, 85, 247, 0.1)', border: '1px solid #a855f7', borderRadius: '6px', color: '#a855f7', cursor: 'pointer', fontWeight: 'bold' }}>🧘 Posture Break</button>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              <button onClick={() => applyPreset('water')} style={{ flex: '1 1 140px', padding: '10px', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid #3b82f6', borderRadius: '6px', color: '#3b82f6', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' }}>💧 Water Check</button>
+              <button onClick={() => applyPreset('break')} style={{ flex: '1 1 140px', padding: '10px', background: 'rgba(168, 85, 247, 0.1)', border: '1px solid #a855f7', borderRadius: '6px', color: '#a855f7', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' }}>🧘 Posture Break</button>
             </div>
           </div>
 
@@ -237,23 +244,24 @@ export default function App() {
           </form>
         </section>
 
-        <section style={{ background: darkMode ? '#161925' : '#fff', padding: '30px', borderRadius: '12px', border: `1px solid ${darkMode ? '#1e2230' : '#e2e8f0'}`, display: 'flex', flexDirection: 'column' }}>
+        {/* RIGHT COLUMN: CARD CONTAINER DECK */}
+        <section style={{ flex: '1 1 400px', background: darkMode ? '#161925' : '#fff', padding: 'clamp(15px, 3vw, 30px)', borderRadius: '12px', border: `1px solid ${darkMode ? '#1e2230' : '#e2e8f0'}`, display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
           <h2 style={{ marginTop: 0, marginBottom: '20px', fontSize: '20px', borderBottom: '2px solid #10b981', paddingBottom: '10px' }}>Saved Reminders Collection ({notificationsList.length})</h2>
           
-          <div style={{ flex: 1, overflowY: 'auto', maxHeight: '500px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+          <div style={{ flex: 1, overflowY: 'auto', maxHeight: '500px', display: 'flex', flexDirection: 'column', gap: '15px', paddingRight: '4px' }}>
             {notificationsList.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '40px', opacity: 0.5 }}>No templates saved. Build your first tracking rule in the generator deck panel left.</div>
+              <div style={{ textAlign: 'center', padding: '40px', opacity: 0.5, fontSize: '14px' }}>No templates saved. Build your first tracking rule in the generator deck panel left.</div>
             ) : (
               notificationsList.map((item) => (
-                <div key={item.id} style={{ background: darkMode ? '#1e2230' : '#f1f5f9', padding: '20px', borderRadius: '8px', borderLeft: '4px solid #10b981', display: 'flex', flexDirection: 'column', gap: '10px', position: 'relative' }}>
-                  <button onClick={() => handleDeleteTemplate(item.id)} style={{ position: 'absolute', top: '15px', right: '15px', background: 'transparent', border: 'none', color: '#ef4444', fontSize: '16px', cursor: 'pointer' }}>✕</button>
+                <div key={item.id} style={{ background: darkMode ? '#1e2230' : '#f1f5f9', padding: '20px', borderRadius: '8px', borderLeft: '4px solid #10b981', display: 'flex', flexDirection: 'column', gap: '12px', position: 'relative', boxSizing: 'border-box' }}>
+                  <button onClick={() => handleDeleteTemplate(item.id)} style={{ position: 'absolute', top: '15px', right: '15px', background: 'transparent', border: 'none', color: '#ef4444', fontSize: '16px', cursor: 'pointer', padding: '4px' }}>✕</button>
                   
                   <div style={{ paddingRight: '25px' }}>
-                    <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 'bold' }}>{item.title}</h4>
-                    <p style={{ margin: '5px 0 0 0', fontSize: '13px', opacity: 0.8, lineHeight: '1.4' }}>{item.body}</p>
+                    <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 'bold', lineHeight: '1.4' }}>{item.title}</h4>
+                    <p style={{ margin: '6px 0 0 0', fontSize: '13px', opacity: 0.8, lineHeight: '1.5' }}>{item.body}</p>
                   </div>
 
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '5px', borderTop: `1px solid ${darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'}`, paddingTop: '10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginTop: '5px', borderTop: `1px solid ${darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'}`, paddingTop: '10px' }}>
                     <span style={{ fontSize: '11px', opacity: 0.5, fontWeight: 'bold' }}>🔥 Dispatched: {item.sentCount || 0} times</span>
                     
                     <button onClick={() => handleSendNotification(item.id, item.title, item.body)} style={{ background: '#10b981', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '4px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', minWidth: '110px' }}>
