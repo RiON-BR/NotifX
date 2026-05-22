@@ -1,3 +1,4 @@
+// frontend/src/firebase.js
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getMessaging } from "firebase/messaging";
@@ -12,15 +13,7 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
 
-let messaging = null;
-try {
-  messaging = getMessaging(app);
-} catch (e) {
-  console.warn("Messaging initialization bypassed in this environment context.");
-}
-
-const VAPID_KEY = "BFJHmUNkzX_euJTDVoyW44cR9iEVcAMzYa9D-pwJFD9APd0JQJH5DGtnZbs403kE-IM3qM-HlyeNIoleVmJYTIs";
-
-export { db, messaging, VAPID_KEY };
+export const db = getFirestore(app);
+export const messaging = getMessaging(app);
+export const VAPID_KEY = "BFJHmUNkzX_euJTDVoyW44cR9iEVcAMzYa9D-pwJFD9APd0JQJH5DGtnZbs403kE-IM3qM-HlyeNIoleVmJYTIs";

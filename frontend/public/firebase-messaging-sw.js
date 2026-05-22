@@ -1,6 +1,10 @@
+// frontend/public/firebase-messaging-sw.js
+
+// Import the official compatible Firebase scripts
 importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js');
 
+// Initialize the background app channel
 firebase.initializeApp({
   apiKey: "AIzaSyD0Eb0io47XaNTarvsy6pYgEqA0HMiccEM",
   authDomain: "focus-buddy-3b565.firebaseapp.com",
@@ -12,17 +16,17 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
+// Intercept incoming notifications when the browser tab is completely closed or unfocused
 messaging.onBackgroundMessage((payload) => {
-  console.log('[firebase-messaging-sw.js] Background packet intercepted: ', payload);
-
-  const notificationTitle = payload.notification.title || "Focus Buddy Reminder!";
+  console.log('[firebase-messaging-sw.js] Received background payload: ', payload);
+  
+  const notificationTitle = payload.notification.title || "NotifX Alert!";
   const notificationOptions = {
-    body: payload.notification.body || "A workspace alert was triggered.",
-    icon: '/favicon.svg',
-    badge: '/favicon.svg',
-    tag: 'focus-buddy-alert', 
-    requireInteraction: true 
+    body: payload.notification.body || "You have an incoming notification.",
+    icon: '/icons.svg', // Points to your frontend public vector assets folder
+    tag: 'focus-buddy-notification', // Overwrites previous cards instead of cluttering the system drawer
+    requireInteraction: true // Keeps the banner on Windows Desktop until user dismisses it
   };
 
-  return self.registration.showNotification(notificationTitle, notificationOptions);
+  self.registration.showNotification(notificationTitle, notificationOptions);
 });

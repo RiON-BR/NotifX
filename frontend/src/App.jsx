@@ -24,6 +24,9 @@ export default function App() {
   const [activeIntervals, setActiveIntervals] = useState({});
   const [actionFeedback, setActionFeedback] = useState({}); 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // LIVE PIPELINE STATUS
+  const [connectionStatus, setConnectionStatus] = useState("Connecting...");
 
   // Load configuration tokens from localStorage on mount
   useEffect(() => {
@@ -32,89 +35,137 @@ export default function App() {
       setUserName(savedName);
       setIsNameSet(true);
     }
-    setDarkMode(localStorage.getItem('studio_darkmode') === 'true');
-    setTotalSentCount(parseInt(localStorage.getItem('studio_sent_stat') || "0", 10));
   }, []);
 
-  // Base-Safe Service Worker Registration Lifecycle
+  // ⚡ STABLE HTTPS PRODUCTION PIPELINE PIPING
   useEffect(() => {
-    let heartbeatLoop;
-    let isMounted = true;
-
-    async function establishHardwareLink() {
+    async function initializeNotificationPipeline() {
       try {
-        if (!messaging) return;
-        
-        const permission = await Notification.requestPermission();
-        if (permission !== 'granted') {
-          console.warn("Desktop notification permissions denied by user.");
+        if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+          console.warn("This browser context doesn't support background system notifications.");
+          setConnectionStatus("Unsupported");
           return;
         }
 
-        // Dynamically process sub-paths using Vite's asset base system
-        const baseEnvPath = import.meta.env.BASE_URL || '/';
-        const serviceWorkerPath = `${baseEnvPath.endsWith('/') ? baseEnvPath : baseEnvPath + '/'}firebase-messaging-sw.js`.replace(/\/+/g, '/');
+        // Register the background worker file explicitly
+        const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+        await navigator.serviceWorker.ready;
+        console.log("Service Worker Active Scope:", registration.scope);
 
-        const registration = await navigator.serviceWorker.register(serviceWorkerPath);
-        
-        const token = await getToken(messaging, { 
-          vapidKey: VAPID_KEY, 
-          serviceWorkerRegistration: registration 
+        // Request desktop banners authority
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+          setConnectionStatus("Permission Denied");
+          return;
+        }
+
+        // Fetch secure token passing registration parameters
+        const targetDeviceToken = await getToken(messaging, {
+          vapidKey: VAPID_KEY,
+          serviceWorkerRegistration: registration
         });
 
-        if (token && isMounted) {
-          setFcmToken(token);
+        if (targetDeviceToken) {
+          setFcmToken(targetDeviceToken);
           
-          // Seed active link instantly inside the config collection reference document
-          await setDoc(doc(db, "config", "targetDevice"), { 
-            token: token,
+          // Mirror tracking credentials directly up to your Firestore database backend
+          await setDoc(doc(db, "config", "targetDevice"), {
+            fcmToken: targetDeviceToken,
+            heartbeat: new Date().toISOString(),
             lastSeen: Date.now()
-          });
+          }, { merge: true });
 
-          // Heartbeat loop runs every 30 seconds to keep backend watchdog warm
-          heartbeatLoop = setInterval(() => {
-            updateDoc(doc(db, "config", "targetDevice"), { lastSeen: Date.now() })
-              .catch(err => console.warn("Heartbeat write skipped:", err.message));
-          }, 30000);
+          setConnectionStatus("Connected");
+        } else {
+          setConnectionStatus("Token Generation Failed");
         }
-      } catch (err) {
-        console.error("Hardware channel registration failed:", err);
+      } catch (error) {
+        console.error("Pipeline Crash Details:", error);
+        setConnectionStatus("Error Linking Pipeline");
       }
     }
-    
-    establishHardwareLink();
 
-    const unsubscribeForeground = onMessage(messaging, (payload) => {
-      alert(`🔔 ${payload.notification.title}\n\n${payload.notification.body}`);
-    });
-
-    return () => {
-      isMounted = false;
-      unsubscribeForeground();
-      if (heartbeatLoop) clearInterval(heartbeatLoop);
-    };
+    initializeNotificationPipeline();
   }, []);
 
-  // Listen for custom saved template items in cloud Firestore
+  // Sync saved reminder collections from Firestore database ledger
   useEffect(() => {
-    const q = query(collection(db, "custom_notifications"), orderBy("createdAt", "desc"));
-    const unsubscribeList = onSnapshot(q, (snapshot) => {
-      const buffer = [];
-      snapshot.forEach(doc => {
-        buffer.push({ id: doc.id, ...doc.data() });
-      });
-      setNotificationsList(buffer);
+    const q = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      setNotificationsList(list);
+      
+      // Calculate continuous dispatch scores natively
+      const count = list.reduce((acc, curr) => acc + (curr.sentCount || 0), 0);
+      setTotalSentCount(count);
     });
-    return () => unsubscribeList();
+    return () => unsubscribe();
   }, []);
 
-  const toggleDarkMode = () => {
-    const nextMode = !darkMode;
-    setDarkMode(nextMode);
-    localStorage.setItem('studio_darkmode', nextMode);
+  // Foreground message catcher hook loop
+  useEffect(() => {
+    const unsubscribe = onMessage(messaging, (payload) => {
+      console.log('Foreground notification caught: ', payload);
+      new Notification(payload.notification.title, {
+        body: payload.notification.body,
+        icon: '/icons.svg'
+      });
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Core Template Engine Dispatch Handlers
+  const handleSaveTemplate = async (e) => {
+    e.preventDefault();
+    if (!title.trim() || !body.trim()) return;
+    setIsSubmitting(true);
+    try {
+      await addDoc(collection(db, 'notifications'), {
+        title,
+        body,
+        createdAt: new Date().toISOString(),
+        sentCount: 0
+      });
+      setTitle('');
+      setBody('');
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleSaveProfileName = (e) => {
+  const handleSendNotification = async (id, notificationTitle, notificationBody) => {
+    setActionFeedback(prev => ({ ...prev, [id]: 'Sending...' }));
+    try {
+      // Increments transaction tracker on MongoDB pipeline layer
+      const docRef = doc(db, 'notifications', id);
+      const target = notificationsList.find(n => n.id === id);
+      await updateDoc(docRef, { sentCount: (target.sentCount || 0) + 1 });
+      
+      // Post atomic event trigger up to Firestore trigger node collection channels
+      await addDoc(collection(db, 'triggerQueue'), {
+        title: notificationTitle,
+        body: notificationBody,
+        token: fcmToken,
+        triggeredAt: new Date().toISOString()
+      });
+      
+      setActionFeedback(prev => ({ ...prev, [id]: 'Dispatched! 🚀' }));
+      setTimeout(() => setActionFeedback(prev => ({ ...prev, [id]: null })), 3000);
+    } catch (err) {
+      console.error(err);
+      setActionFeedback(prev => ({ ...prev, [id]: 'Failed' }));
+    }
+  };
+
+  const handleDeleteTemplate = async (id) => {
+    if (window.confirm("Delete this reminder template?")) {
+      await deleteDoc(doc(db, 'notifications', id));
+    }
+  };
+
+  const handleUsernameSubmit = (e) => {
     e.preventDefault();
     if (!tempName.trim()) return;
     localStorage.setItem('studio_username', tempName.trim());
@@ -122,342 +173,129 @@ export default function App() {
     setIsNameSet(true);
   };
 
-  const handleClearProfileName = () => {
-    localStorage.removeItem('studio_username');
-    setUserName('');
-    setTempName('');
-    setIsNameSet(false);
-  };
-
-  const useQuickTemplate = useCallback((qTitle, qBody) => {
-    setTitle(qTitle);
-    setBody(qBody);
-  }, []);
-
-  const handleSaveNotification = async (e) => {
-    e.preventDefault();
-    if (!title.trim() || !body.trim() || isSubmitting) return;
-
-    setIsSubmitting(true);
-    try {
-      await addDoc(collection(db, "custom_notifications"), {
-        title: title.trim(),
-        body: body.trim(),
-        createdAt: new Date()
-      });
-      setTitle('');
-      setBody('');
-    } catch (err) {
-      console.error("Error saving document template node:", err);
-    } finally {
-      setIsSubmitting(false);
+  // Preset quick fillers macro buttons
+  const applyPreset = (presetType) => {
+    if (presetType === 'water') {
+      setTitle('💧 Hydration Check!');
+      setBody('Time to look up from your screen and take a sip of water.');
+    } else if (presetType === 'break') {
+      setTitle('🧘 Break Time!');
+      setBody('Step away from your monitor, stretch your arms, and look outside for a moment.');
     }
   };
-
-  const handleDeleteTemplate = async (id, e) => {
-    e.stopPropagation();
-    if (activeIntervals[id]) clearInterval(activeIntervals[id]);
-    if (activeTimers[id]) clearTimeout(activeTimers[id]);
-    try {
-      await deleteDoc(doc(db, "custom_notifications", id));
-    } catch (err) {
-      console.error("Error removing database template node:", err);
-    }
-  };
-
-  const showStatusFeedback = (id, message) => {
-    setActionFeedback(prev => ({ ...prev, [id]: message }));
-    setTimeout(() => {
-      setActionFeedback(prev => ({ ...prev, [id]: null }));
-    }, 2000);
-  };
-
-  const handleTriggerNotification = (notifItem) => {
-    const id = notifItem.id;
-    
-    if (activeIntervals[id]) {
-      clearInterval(activeIntervals[id]);
-      setActiveIntervals(prev => { const copy = { ...prev }; delete copy[id]; return copy; });
-      showStatusFeedback(id, "Stopped 🛑");
-      return;
-    }
-
-    const chosenIntervalMinutes = parseInt(intervalSettings[id] || "0", 10);
-    const chosenDelayMinutes = parseInt(delaySettings[id] || "0", 10);
-
-    const updateStats = () => {
-      setTotalSentCount(prev => {
-        const nextValue = prev + 1;
-        localStorage.setItem('studio_sent_stat', nextValue);
-        return nextValue;
-      });
-    };
-
-    if (chosenIntervalMinutes > 0) {
-      dispatchTriggerToFirestore(notifItem);
-      updateStats();
-      showStatusFeedback(id, "Repeating 🔁");
-      
-      const intervalId = setInterval(() => {
-        dispatchTriggerToFirestore(notifItem);
-        updateStats();
-      }, chosenIntervalMinutes * 60 * 1000);
-
-      setActiveIntervals(prev => ({ ...prev, [id]: intervalId }));
-      return;
-    }
-
-    if (activeTimers[id]) clearTimeout(activeTimers[id]);
-
-    if (chosenDelayMinutes === 0) {
-      dispatchTriggerToFirestore(notifItem);
-      updateStats();
-      showStatusFeedback(id, "Sent ✨");
-    } else {
-      showStatusFeedback(id, "Queued ⏳");
-      const timerId = setTimeout(() => {
-        dispatchTriggerToFirestore(notifItem);
-        updateStats();
-        setActiveTimers(prev => { const copy = { ...prev }; delete copy[id]; return copy; });
-      }, chosenDelayMinutes * 60 * 1000);
-
-      setActiveTimers(prev => ({ ...prev, [id]: timerId }));
-    }
-  };
-
-  const deleteTriggerStatsLog = () => {
-    localStorage.setItem('studio_sent_stat', '0');
-    setTotalSentCount(0);
-  };
-
-  const dispatchTriggerToFirestore = async (item) => {
-    try {
-      await addDoc(collection(db, "notification_triggers"), {
-        title: item.title,
-        body: item.body,
-        triggeredAt: new Date()
-      });
-    } catch (err) {
-      console.error("Failed to commit trigger event payload:", err);
-    }
-  };
-
-  const dynamicTheme = darkMode ? styles.dark : styles.light;
 
   if (!isNameSet) {
     return (
-      <div style={{ ...styles.appContainer, backgroundColor: '#f8fafc' }}>
-        <div style={styles.setupCard}>
-          <h1 style={styles.setupTitle}>✨ Welcome to Notification Hub</h1>
-          <p style={styles.setupSubtitle}>Please type your name to open your dashboard.</p>
-          <form onSubmit={handleSaveProfileName} style={styles.form}>
-            <div style={styles.inputGroup}>
-              <label htmlFor="user-profile-setup-name" style={styles.label}>Your Name</label>
-              <input type="text" id="user-profile-setup-name" value={tempName} onChange={e => setTempName(e.target.value)} placeholder="Enter your name..." style={styles.input} required maxLength={25} />
-            </div>
-            <button type="submit" style={styles.saveBtn}>Open Dashboard</button>
-          </form>
-        </div>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', backgroundColor: darkMode ? '#0f111a' : '#f3f4f6', color: darkMode ? '#fff' : '#000', fontFamily: 'sans-serif' }}>
+        <form onSubmit={handleUsernameSubmit} style={{ background: darkMode ? '#1e2230' : '#fff', padding: '40px', borderRadius: '12px', boxShadow: '0 4px 20px rgba(0,0,0,0.1)', textAlign: 'center' }}>
+          <h2>Welcome to NotifX</h2>
+          <p style={{ opacity: 0.7, marginBottom: '20px' }}>Enter your name to unlock your notification studio workspace</p>
+          <input type="text" value={tempName} onChange={(e) => setTempName(e.target.value)} placeholder="e.g., Niyati Joshi" required style={{ width: '80%', padding: '12px', borderRadius: '6px', border: '1px solid #ccc', marginBottom: '20px', fontSize: '16px' }} />
+          <br />
+          <button type="submit" style={{ padding: '12px 30px', border: 'none', borderRadius: '6px', backgroundColor: '#3b82f6', color: '#fff', fontSize: '16px', cursor: 'pointer', fontWeight: 'bold' }}>Enter Studio Workspace</button>
+        </form>
       </div>
     );
   }
 
   return (
-    <div style={{ ...styles.appContainer, backgroundColor: dynamicTheme.bgCanvas }}>
-      <div style={{ ...styles.mainCard, backgroundColor: dynamicTheme.bgPanel, borderColor: dynamicTheme.borderLine }}>
+    <div style={{ backgroundColor: darkMode ? '#0f111a' : '#f8fafc', minHeight: '100vh', color: darkMode ? '#f8fafc' : '#0f111a', fontFamily: 'sans-serif', transition: 'all 0.3s ease' }}>
+      
+      {/* HEADER HERO STRIP PANEL */}
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 40px', borderBottom: `1px solid ${darkMode ? '#1e2230' : '#e2e8f0'}`, background: darkMode ? '#161925' : '#fff' }}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 800 }}>NJ's Workspace <span style={{ fontSize: '14px', fontWeight: 400, opacity: 0.6 }}>({userName})</span></h1>
+          <p style={{ margin: '5px 0 0 0', fontSize: '13px', opacity: 0.7 }}>Create, organize, and automate systemic desktop intervals</p>
+        </div>
         
-        {/* Workspace Profile Custom Top Banner Bar */}
-        <div style={{ ...styles.headerBar, borderColor: dynamicTheme.borderLine }}>
-          <div style={styles.userInfoSide}>
-            <div style={{ ...styles.userAvatar, backgroundColor: dynamicTheme.avatarBg, color: dynamicTheme.textMain }}>
-              {userName.substring(0, 2).toUpperCase()}
-            </div>
-            <div>
-              <h1 style={{ ...styles.mainTitle, color: dynamicTheme.textMain }}>
-                {userName}'s Workspace
-                <span onClick={handleClearProfileName} style={styles.changeNameLink}> (switch user)</span>
-              </h1>
-              <p style={{ ...styles.subtitle, color: dynamicTheme.textMuted }}>Create, save, and schedule custom desktop reminders</p>
-            </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+          {/* LIVE NETWORK PIPELINE STATUS CARD */}
+          <div style={{ background: darkMode ? '#1e2230' : '#f1f5f9', padding: '8px 16px', borderRadius: '20px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold' }}>
+            <span style={{ color: connectionStatus === "Connected" ? "#10b981" : "#f59e0b" }}>●</span> 
+            <span style={{ opacity: 0.9 }}>{connectionStatus}</span>
           </div>
+
+          <button onClick={() => setDarkMode(!darkMode)} style={{ background: darkMode ? '#1e2230' : '#e2e8f0', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: 'inherit' }}>
+            {darkMode ? '☀️ Light' : '🌙 Dark'}
+          </button>
           
-          <div style={styles.statusGroup}>
-            <div style={styles.controlsRowTop}>
-              <button onClick={toggleDarkMode} style={{ ...styles.themeToggleBtn, backgroundColor: dynamicTheme.avatarBg, color: dynamicTheme.textMain }}>
-                {darkMode ? '☀️ Light' : '🌙 Dark'}
-              </button>
-              <div style={{ ...styles.metaBadge, backgroundColor: dynamicTheme.avatarBg, borderColor: dynamicTheme.borderLine, color: dynamicTheme.textMain }}>
-                Total Saved: {notificationsList.length}
-              </div>
-            </div>
-            
-            <div style={{
-              ...styles.statusBadge,
-              backgroundColor: fcmToken ? '#ecfdf5' : '#fff1f2',
-              color: fcmToken ? '#065f46' : '#9f1239'
-            }}>
-              <span style={{ ...styles.statusDot, backgroundColor: fcmToken ? '#10b981' : '#f43f5e' }}></span>
-              <span>{fcmToken ? "Connected" : "Connecting..."}</span>
-            </div>
-          </div>
+          <button onClick={() => { localStorage.clear(); setIsNameSet(false); }} style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '13px' }}>Switch User</button>
         </div>
+      </header>
 
-        {/* Local Cached Metrics Tracker Strip */}
-        <div style={{ ...styles.analyticsStrip, backgroundColor: dynamicTheme.avatarBg, borderColor: dynamicTheme.borderLine }}>
-          <span style={{ ...styles.analyticsText, color: dynamicTheme.textMain }}>
-            📊 <strong>Productivity Score:</strong> You have dispatched <strong>{totalSentCount}</strong> active notifications this session!
-          </span>
-          {totalSentCount > 0 && <button onClick={deleteTriggerStatsLog} style={styles.resetStatsLink}>Reset Count</button>}
-        </div>
-
-        {/* Workspace Layout Grid Splitter */}
-        <div style={styles.layoutGrid}>
-          
-          {/* Creation Section Panel */}
-          <div style={styles.leftPanel}>
-            <h2 style={{ ...styles.sectionTitle, color: dynamicTheme.textMain }}>Create Reminder</h2>
-            
-            <div style={styles.quickTagsContainer}>
-              <span style={styles.tagHelpText}>Presets:</span>
-              <button type="button" onClick={() => useQuickTemplate("Water Reminder! 💧", "Time to drink a fresh glass of water.")} style={{ ...styles.macroTag, borderColor: dynamicTheme.borderLine, color: dynamicTheme.textMain }}>💧 Water</button>
-              <button type="button" onClick={() => useQuickTemplate("Break Time! ☕", "Step away from your monitor and stretch.")} style={{ ...styles.macroTag, borderColor: dynamicTheme.borderLine, color: dynamicTheme.textMain }}>☕ Break</button>
-            </div>
-
-            <form onSubmit={handleSaveNotification} style={styles.form}>
-              <div style={styles.inputGroup}>
-                <label htmlFor="notification-title-input" style={{ ...styles.label, color: dynamicTheme.textMuted }}>Notification Title</label>
-                <input id="notification-title-input" name="notificationTitle" type="text" value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g., Take a break!" style={{ ...styles.input, borderColor: dynamicTheme.borderLine, color: dynamicTheme.textMain, backgroundColor: dynamicTheme.bgCanvas }} required maxLength={50} />
-              </div>
-
-              <div style={styles.inputGroup}>
-                <label htmlFor="notification-body-textarea" style={{ ...styles.label, color: dynamicTheme.textMuted }}>Message Body</label>
-                <textarea id="notification-body-textarea" name="notificationBody" value={body} onChange={e => setBody(e.target.value)} placeholder="Type what you want the popup card to say..." rows="4" style={{ ...styles.textarea, borderColor: dynamicTheme.borderLine, color: dynamicTheme.textMain, backgroundColor: dynamicTheme.bgCanvas }} required maxLength={250} />
-              </div>
-              
-              <button type="submit" disabled={isSubmitting} style={{ ...styles.saveBtn, backgroundColor: dynamicTheme.btnMain, color: dynamicTheme.btnText, opacity: isSubmitting ? 0.7 : 1 }}>
-                {isSubmitting ? "Saving..." : "Save Template"}
-              </button>
-            </form>
+      {/* DASHBOARD SCORE SUMMARY COMPONENT */}
+      <div style={{ padding: '20px 40px 0 40px' }}>
+        <div style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)', color: '#fff', padding: '20px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 4px 15px rgba(29, 78, 216, 0.2)' }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: '18px' }}>🚀 Productivity Analytics Hub</h3>
+            <p style={{ margin: '5px 0 0 0', opacity: 0.9, fontSize: '14px' }}>You have successfully dispatched <strong style={{ fontSize: '18px' }}>{totalSentCount}</strong> secure system alerts this active session context loops!</p>
           </div>
-
-          {/* Active Registration Feed Section Panel */}
-          <div style={styles.rightPanel}>
-            <h2 style={{ ...styles.sectionTitle, color: dynamicTheme.textMain }}>Saved Reminders Collection</h2>
-            <div style={styles.listContainer}>
-              {notificationsList.length === 0 ? (
-                <div style={{ ...styles.emptyState, backgroundColor: dynamicTheme.avatarBg, borderColor: dynamicTheme.borderLine, color: dynamicTheme.textMuted }}>No reminders saved yet. Create one on the left panel!</div>
-              ) : (
-                notificationsList.map((notif) => {
-                  const id = notif.id;
-                  const isTimerRunning = !!activeTimers[id];
-                  const isIntervalRunning = !!activeIntervals[id];
-                  const feedbackState = actionFeedback[id];
-                  
-                  return (
-                    <div key={id} style={{ ...styles.templateCard, backgroundColor: dynamicTheme.bgCanvas, borderColor: dynamicTheme.borderLine }}>
-                      <div style={styles.cardText}>
-                        <div style={styles.titleRow}>
-                          <span style={{ ...styles.cardTitle, color: dynamicTheme.textMain }}>{notif.title}</span>
-                          <button onClick={(e) => handleDeleteTemplate(id, e)} style={styles.deleteBtn}>✕</button>
-                        </div>
-                        <p style={{ ...styles.cardBody, color: dynamicTheme.textMuted }}>{notif.body}</p>
-                      </div>
-                      
-                      <div style={{ ...styles.controlCluster, borderColor: dynamicTheme.borderLine }}>
-                        <select 
-                          aria-label="Select delay configuration timing offset values"
-                          disabled={isTimerRunning || isIntervalRunning}
-                          value={delaySettings[id] || "0"} 
-                          onChange={(e) => setDelaySettings(prev => ({ ...prev, [id]: e.target.value }))}
-                          style={{ ...styles.selectDropdown, borderColor: dynamicTheme.borderLine, color: dynamicTheme.textMain, backgroundColor: dynamicTheme.bgPanel }}
-                        >
-                          <option value="0">Send Instantly</option>
-                          <option value="5">Delay 5 Mins</option>
-                          <option value="15">Delay 15 Mins</option>
-                        </select>
-
-                        <select 
-                          aria-label="Select repeat intervals loop cycles properties"
-                          disabled={isTimerRunning || isIntervalRunning}
-                          value={intervalSettings[id] || "0"} 
-                          onChange={(e) => setIntervalSettings(prev => ({ ...prev, [id]: e.target.value }))}
-                          style={{ ...styles.selectDropdown, borderColor: dynamicTheme.borderLine, color: dynamicTheme.textMain, backgroundColor: dynamicTheme.bgPanel }}
-                        >
-                          <option value="0">Run Once</option>
-                          <option value="5">Repeat 5 Mins</option>
-                          <option value="30">Repeat 30 Mins</option>
-                        </select>
-
-                        <button 
-                          onClick={() => handleTriggerNotification(notif)} 
-                          style={{
-                            ...styles.triggerBtn,
-                            backgroundColor: feedbackState ? '#e2e8f0' : isIntervalRunning ? '#fee2e2' : isTimerRunning ? '#fef3c7' : '#eff6ff',
-                            color: feedbackState ? '#475569' : isIntervalRunning ? '#991b1b' : isTimerRunning ? '#92400e' : '#1e40af',
-                          }}
-                        >
-                          {feedbackState || (isIntervalRunning ? "Stop 🛑" : isTimerRunning ? "Queued ⏳" : "Send 🕊️")}
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
+          <button onClick={() => setTotalSentCount(0)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', padding: '8px 16px', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontWeight: 'bold' }}>Reset Count</button>
         </div>
-
       </div>
+
+      {/* DOUBLE PANEL DATA DESK GRID LAYOUT */}
+      <main style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '40px', padding: '30px 40px' }}>
+        
+        {/* PANEL LEFT: MANIFEST GENERATION DESK */}
+        <section style={{ background: darkMode ? '#161925' : '#fff', padding: '30px', borderRadius: '12px', border: `1px solid ${darkMode ? '#1e2230' : '#e2e8f0'}` }}>
+          <h2 style={{ marginTop: 0, marginBottom: '20px', fontSize: '20px', borderBottom: '2px solid #3b82f6', paddingBottom: '10px' }}>Create New Reminder</h2>
+          
+          <div style={{ marginBottom: '25px' }}>
+            <label style={{ display: 'block', fontSize: '14px', fontWeight: 'bold', marginBottom: '8px', opacity: 0.8 }}>Quick Presets Macros:</label>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button onClick={() => applyPreset('water')} style={{ flex: 1, padding: '10px', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid #3b82f6', borderRadius: '6px', color: '#3b82f6', cursor: 'pointer', fontWeight: 'bold' }}>💧 Water Check</button>
+              <button onClick={() => applyPreset('break')} style={{ flex: 1, padding: '10px', background: 'rgba(168, 85, 247, 0.1)', border: '1px solid #a855f7', borderRadius: '6px', color: '#a855f7', cursor: 'pointer', fontWeight: 'bold' }}>🧘 Posture Break</button>
+            </div>
+          </div>
+
+          <form onSubmit={handleSaveTemplate}>
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', fontSize: '14px', fontWeight: 'bold', marginBottom: '8px' }}>Notification Heading Banner Title:</label>
+              <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g., Complete LeetCode Contest Stack!" required style={{ width: '100%', padding: '12px', boxSizing: 'border-box', borderRadius: '6px', border: `1px solid ${darkMode ? '#2e3440' : '#cbd5e1'}`, background: darkMode ? '#0f111a' : '#fff', color: 'inherit', fontSize: '15px' }} />
+            </div>
+
+            <div style={{ marginBottom: '25px' }}>
+              <label style={{ display: 'block', fontSize: '14px', fontWeight: 'bold', marginBottom: '8px' }}>Notification Message Content Body:</label>
+              <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Write what you want the system desktop alert drawer toast message card to display..." required rows="4" style={{ width: '100%', padding: '12px', boxSizing: 'border-box', borderRadius: '6px', border: `1px solid ${darkMode ? '#2e3440' : '#cbd5e1'}`, background: darkMode ? '#0f111a' : '#fff', color: 'inherit', fontSize: '14px', resize: 'vertical' }}></textarea>
+            </div>
+
+            <button type="submit" disabled={isSubmitting} style={{ width: '100%', padding: '14px', background: '#3b82f6', border: 'none', borderRadius: '6px', color: '#fff', fontSize: '16px', fontWeight: 'bold', cursor: isSubmitting ? 'not-allowed' : 'pointer', opacity: isSubmitting ? 0.7 : 1 }}>
+              {isSubmitting ? 'Saving Template...' : '💾 Save Reminder Template'}
+            </button>
+          </form>
+        </section>
+
+        {/* PANEL RIGHT: COLLECTION TEMPLATE LEDGER */}
+        <section style={{ background: darkMode ? '#161925' : '#fff', padding: '30px', borderRadius: '12px', border: `1px solid ${darkMode ? '#1e2230' : '#e2e8f0'}`, display: 'flex', flexDirection: 'column' }}>
+          <h2 style={{ marginTop: 0, marginBottom: '20px', fontSize: '20px', borderBottom: '2px solid #10b981', paddingBottom: '10px' }}>Saved Reminders Collection ({notificationsList.length})</h2>
+          
+          <div style={{ flex: 1, overflowY: 'auto', maxHieght: '500px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+            {notificationsList.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px', opacity: 0.5 }}>No templates saved. Build your first tracking rule in the generator deck panel left.</div>
+            ) : (
+              notificationsList.map((item) => (
+                <div key={item.id} style={{ background: darkMode ? '#1e2230' : '#f1f5f9', padding: '20px', borderRadius: '8px', borderLeft: '4px solid #10b981', display: 'flex', flexDirection: 'column', gap: '10px', position: 'relative' }}>
+                  <button onClick={() => handleDeleteTemplate(item.id)} style={{ position: 'absolute', top: '15px', right: '15px', background: 'transparent', border: 'none', color: '#ef4444', fontSize: '16px', cursor: 'pointer' }}>✕</button>
+                  
+                  <div style={{ paddingRight: '25px' }}>
+                    <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 'bold' }}>{item.title}</h4>
+                    <p style={{ margin: '5px 0 0 0', fontSize: '13px', opacity: 0.8, lineHeight: '1.4' }}>{item.body}</p>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '5px', borderTop: `1px solid ${darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'}`, paddingTop: '10px' }}>
+                    <span style={{ fontSize: '11px', opacity: 0.5, fontWeight: 'bold' }}>🔥 Dispatched: {item.sentCount || 0} times</span>
+                    
+                    <button onClick={() => handleSendNotification(item.id, item.title, item.body)} style={{ background: '#10b981', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '4px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', minWidth: '110px' }}>
+                      {actionFeedback[item.id] || 'Send Instant 🚀'}
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+      </main>
     </div>
   );
 }
-
-// Minimal Architecture Style Matrix Configuration Properties Tokens
-const styles = {
-  light: { bgCanvas: '#f8fafc', bgPanel: '#ffffff', borderLine: '#e2e8f0', textMain: '#1e293b', textMuted: '#64748b', avatarBg: '#f1f5f9', btnMain: '#1e293b', btnText: '#ffffff' },
-  dark: { bgCanvas: '#0f172a', bgPanel: '#1e293b', borderLine: '#334155', textMain: '#f8fafc', textMuted: '#94a3b8', avatarBg: '#0f172a', btnMain: '#38bdf8', btnText: '#0f172a' },
-  appContainer: { minHeight: '100vh', width: '100vw', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '40px', boxSizing: 'border-box', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', transition: 'background 0.25s ease' },
-  setupCard: { width: '100%', maxWidth: '400px', backgroundColor: '#ffffff', borderRadius: '16px', padding: '35px', boxShadow: '0 4px 12px rgba(0,0,0,0.03)', border: '1px solid #e2e8f0', boxSizing: 'border-box' },
-  setupTitle: { margin: '0 0 8px 0', fontWeight: '600', fontSize: '20px', color: '#1e293b', textAlign: 'center' },
-  setupSubtitle: { margin: '0 0 24px 0', color: '#64748b', fontSize: '14px', textAlign: 'center', lineHeight: '1.4' },
-  mainCard: { width: '100%', maxWidth: '1200px', minHeight: '680px', borderRadius: '16px', padding: '40px', boxShadow: '0 10px 25px rgba(0,0,0,0.02)', border: '1px solid', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', transition: 'background 0.25s ease, border-color 0.25s ease' },
-  headerBar: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid', paddingBottom: '24px', marginBottom: '20px' },
-  userInfoSide: { display: 'flex', alignItems: 'center', gap: '16px' },
-  userAvatar: { width: '46px', height: '46px', borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', fontWeight: '600', fontSize: '15px', border: '1px solid #cbd5e1' },
-  mainTitle: { margin: '0 0 4px 0', fontWeight: '600', fontSize: '22px' },
-  changeNameLink: { fontSize: '12px', color: '#94a3b8', fontWeight: '400', cursor: 'pointer', marginLeft: '8px' },
-  subtitle: { margin: 0, fontSize: '13px' },
-  statusGroup: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' },
-  controlsRowTop: { display: 'flex', alignItems: 'center', gap: '12px' },
-  themeToggleBtn: { border: '1px solid #cbd5e1', padding: '5px 12px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500' },
-  metaBadge: { fontSize: '12px', border: '1px solid', padding: '4px 10px', borderRadius: '6px', fontWeight: '500' },
-  statusBadge: { display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: '500' },
-  statusDot: { width: '6px', height: '6px', borderRadius: '50%', display: 'inline-block' },
-  analyticsStrip: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid', padding: '12px 20px', borderRadius: '10px', marginBottom: '24px' },
-  analyticsText: { fontSize: '13px' },
-  resetStatsLink: { background: 'none', border: 'none', color: '#ef4444', fontSize: '12px', cursor: 'pointer', fontWeight: '500', textDecoration: 'underline' },
-  layoutGrid: { display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: '48px', flexGrow: 1 },
-  leftPanel: { display: 'flex', flexDirection: 'column' },
-  rightPanel: { display: 'flex', flexDirection: 'column', borderLeft: '1px solid #cbd5e1', paddingLeft: '48px' },
-  sectionTitle: { margin: '0 0 20px 0', fontSize: '15px', fontWeight: '600', letterSpacing: '0.3px' },
-  quickTagsContainer: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '20px' },
-  tagHelpText: { fontSize: '12px', color: '#94a3b8', marginRight: '4px' },
-  macroTag: { background: 'none', border: '1px solid', padding: '6px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: '500', cursor: 'pointer' },
-  form: { display: 'flex', flexDirection: 'column', gap: '16px' },
-  inputGroup: { display: 'flex', flexDirection: 'column', gap: '6px' },
-  label: { fontSize: '12px', fontWeight: '500' },
-  input: { border: '1px solid', borderRadius: '8px', padding: '12px 14px', fontSize: '14px', outline: 'none', width: '100%', boxSizing: 'border-box' },
-  textarea: { border: '1px solid', borderRadius: '8px', padding: '12px 14px', fontSize: '14px', outline: 'none', resize: 'none', width: '100%', boxSizing: 'border-box' },
-  saveBtn: { border: 'none', padding: '14px', borderRadius: '8px', cursor: 'pointer', fontWeight: '500', fontSize: '14px', marginTop: '8px', width: '100%' },
-  listContainer: { display: 'flex', flexDirection: 'column', gap: '16px', maxHeight: '430px', overflowY: 'auto', paddingRight: '8px' },
-  emptyState: { border: '1px dashed', borderRadius: '8px', padding: '40px 20px', textAlign: 'center', fontSize: '13px' },
-  templateCard: { border: '1px solid', borderRadius: '8px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' },
-  cardText: { width: '100%' },
-  titleRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' },
-  cardTitle: { fontWeight: '600', fontSize: '15px' },
-  cardBody: { margin: 0, fontSize: '13px', lineHeight: '1.5' },
-  deleteBtn: { background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px', color: '#94a3b8', padding: '4px' },
-  controlCluster: { display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'flex-end', marginTop: '2px', borderTop: '1px solid', paddingTop: '14px' },
-  selectDropdown: { padding: '6px 10px', borderRadius: '6px', border: '1px solid', fontSize: '12px', outline: 'none', cursor: 'pointer', fontWeight: '500' },
-  triggerBtn: { border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '12px', minWidth: '90px' }
-};
